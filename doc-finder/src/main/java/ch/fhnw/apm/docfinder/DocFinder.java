@@ -25,23 +25,34 @@ public class DocFinder {
     }
 
     public List<Result> findDocs(String searchText) throws IOException {
+        var startTime = System.nanoTime();
         var allDocs = collectDocs();
-
         var results = new ArrayList<Result>();
-        for (var doc : allDocs) {
-            var res = findInDoc(searchText, doc);
+
+        synchronized (allDocs) {allDocs.parallelStream().forEach(doc -> {
+            Result res = null;
+            try {
+                res = findInDoc(searchText, doc);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
             if (res.totalHits() > 0) {
                 results.add(res);
             }
-        }
+        });}
+
 
         results.sort(comparing(Result::getRelevance, reverseOrder()));
+
+        System.out.println((System.nanoTime() - startTime) / 1_000_000.0 + "ms for findDocs()");
 
         return results;
     }
 
     private List<Path> collectDocs() throws IOException {
+        var startTime = System.nanoTime();
         try (var docs = Files.find(rootDir, maxDepth, this::include)) {
+            System.out.println((System.nanoTime() - startTime) / 1_000_000.0 + "ms for collectDocs()");
             return docs.toList();
         }
     }
@@ -52,6 +63,7 @@ public class DocFinder {
     }
 
     private Result findInDoc(String searchText, Path doc) throws IOException {
+        var startTime = System.nanoTime();
         String text;
         try {
             text = Files.readString(doc);
@@ -71,10 +83,12 @@ public class DocFinder {
         var searchTerms = parseSearchText(searchText);
         var searchHits = findInText(searchTerms, normalized);
         var relevance = computeRelevance(searchHits, normalized);
+        System.out.println((System.nanoTime() - startTime) / 1_000_000.0 + "ms for findInDoc()");
         return new Result(doc, searchHits, relevance);
     }
 
     private List<String> parseSearchText(String searchText) {
+        var startTime = System.nanoTime();
         if (searchText.isBlank()) {
             throw new IllegalArgumentException();
         }
@@ -82,12 +96,14 @@ public class DocFinder {
         var parts = searchText
                 .replaceFirst("^\\p{javaWhitespace}", "") // prevent leading empty part
                 .split("\\p{javaWhitespace}+");
+        System.out.println((System.nanoTime() - startTime) / 1_000_000.0 + "ms for parseSearchText()");
         return Stream.of(parts)
                 .distinct() // eliminate duplicates
                 .toList();
     }
 
     private Map<String, List<Integer>> findInText(List<String> searchTerms, String text) {
+        var startTime = System.nanoTime();
         var searchHits = new HashMap<String, List<Integer>>();
         for (var term : searchTerms) {
             var hits = new ArrayList<Integer>();
@@ -101,11 +117,13 @@ public class DocFinder {
             }
             searchHits.put(term, hits);
         }
+        System.out.println((System.nanoTime() - startTime) / 1_000_000.0 + "ms for findInText()");
         return searchHits;
     }
 
     private double computeRelevance(Map<String, List<Integer>> searchHits,
                                     String text) {
+        var startTime = System.nanoTime();
         if (text.isBlank()) {
             return 0;
         }
@@ -116,6 +134,7 @@ public class DocFinder {
                 .filter(list -> list.size() > 0)
                 .count();
         var termHitRatio = (double) termsWithHits / searchHits.size();
+        System.out.println((System.nanoTime() - startTime) / 1_000_000.0 + "ms for computeRelevance()");
         return Math.pow(avgHits + 1, termHitRatio) / text.length() * 1_000_000;
     }
 
